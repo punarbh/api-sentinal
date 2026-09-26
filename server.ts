@@ -1,4 +1,5 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import path from 'path';
@@ -106,8 +107,14 @@ app.set('trust proxy', true);
 // Initialize Supabase Client (Credentials kept strictly server-side - Least Privilege Architecture)
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const supabaseClient = supabaseUrl && supabaseKey
-  ? createClient(supabaseUrl, supabaseKey, {
+const isSupabaseConfigured = Boolean(
+  supabaseUrl &&
+  supabaseKey &&
+  !supabaseUrl.includes('your-project-id') &&
+  !supabaseKey.includes('your-supabase')
+);
+const supabaseClient = isSupabaseConfigured
+  ? createClient(supabaseUrl!, supabaseKey!, {
       auth: { persistSession: false, autoRefreshToken: false },
     })
   : null;
@@ -1201,11 +1208,15 @@ app.post('/api/auth/register', async (req, res) => {
       });
 
       if (sbError) {
-        const errorMsg = sbError.message.toLowerCase();
+        const errorMsg = (sbError.message || '').toLowerCase();
         if (errorMsg.includes('already registered') || errorMsg.includes('already exists')) {
           return res.status(400).json({ error: 'An account with this email already exists' });
         }
-        return res.status(400).json({ error: sbError.message });
+        if (errorMsg.includes('fetch failed') || errorMsg.includes('network') || errorMsg.includes('econnrefused')) {
+          console.warn('[Supabase Auth Connection Notice]:', sbError.message, '- falling back to in-memory store');
+        } else {
+          return res.status(400).json({ error: sbError.message });
+        }
       }
 
       if (sbData?.user) {

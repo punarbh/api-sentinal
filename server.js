@@ -14566,6 +14566,12 @@ var require_main4 = __commonJS({
 });
 
 // server.ts
+var server_exports = {};
+__export(server_exports, {
+  app: () => app,
+  default: () => server_default
+});
+module.exports = __toCommonJS(server_exports);
 var import_express = __toESM(require("express"), 1);
 var import_http = __toESM(require("http"), 1);
 var import_ws = require("ws");
@@ -22767,16 +22773,45 @@ var app = (0, import_express.default)();
 app.use(
   (0, import_cors.default)({
     origin: "*",
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-Client-ID", "X-Account-ID"]
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+      "X-Client-ID",
+      "X-Account-ID",
+      "X-Session-ID",
+      "Accept"
+    ],
+    exposedHeaders: [
+      "X-Sentinel-Risk-Score",
+      "X-Sentinel-Risk-Level",
+      "X-Sentinel-Action",
+      "X-Sentinel-Latency",
+      "Retry-After"
+    ]
   })
 );
+app.use((req, _res, next) => {
+  if (req.method === "GET" && req.headers.accept && req.headers.accept.includes("text/html")) {
+    return next();
+  }
+  if (req.url && !req.url.startsWith("/api") && !req.url.startsWith("/ws") && !req.url.startsWith("/assets")) {
+    if (req.url.startsWith("/auth") || req.url.startsWith("/health") || req.url.startsWith("/dashboard") || req.url.startsWith("/backend") || req.url.startsWith("/threats") || req.url.startsWith("/telemetry") || req.url.startsWith("/policies") || req.url.startsWith("/blocked-clients") || req.url.startsWith("/clients") || req.url.startsWith("/audit-logs") || req.url.startsWith("/distributed-patterns") || req.url.startsWith("/relationship-graph") || req.url.startsWith("/requests") || req.url.startsWith("/protected")) {
+      req.url = "/api" + req.url;
+    }
+  }
+  next();
+});
 app.use(import_express.default.json());
 app.use(import_express.default.urlencoded({ extended: true }));
 app.set("trust proxy", true);
 var supabaseUrl = process.env.SUPABASE_URL;
 var supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-var supabaseClient = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey, {
+var isSupabaseConfigured = Boolean(
+  supabaseUrl && supabaseKey && !supabaseUrl.includes("your-project-id") && !supabaseKey.includes("your-supabase")
+);
+var supabaseClient = isSupabaseConfigured ? createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false }
 }) : null;
 var userAccounts = /* @__PURE__ */ new Map([
@@ -23627,11 +23662,15 @@ app.post("/api/auth/register", async (req, res) => {
         }
       });
       if (sbError) {
-        const errorMsg = sbError.message.toLowerCase();
+        const errorMsg = (sbError.message || "").toLowerCase();
         if (errorMsg.includes("already registered") || errorMsg.includes("already exists")) {
           return res.status(400).json({ error: "An account with this email already exists" });
         }
-        return res.status(400).json({ error: sbError.message });
+        if (errorMsg.includes("fetch failed") || errorMsg.includes("network") || errorMsg.includes("econnrefused")) {
+          console.warn("[Supabase Auth Connection Notice]:", sbError.message, "- falling back to in-memory store");
+        } else {
+          return res.status(400).json({ error: sbError.message });
+        }
       }
       if (sbData?.user) {
         const newAccount2 = {
@@ -23651,7 +23690,18 @@ app.post("/api/auth/register", async (req, res) => {
           sessionToken = loginData.session.access_token;
         }
         activeAuthTokens.set(sessionToken, newAccount2);
-        userAccounts.set(lowerEmail, { account: newAccount2, passwordHash: password });
+        userAccounts.set(lowerEmail, { account: newAccount2, passwordHash: "" });
+        try {
+          await supabaseClient.from("profiles").upsert({
+            id: newAccount2.id,
+            email: lowerEmail,
+            full_name: fullName,
+            organization: newAccount2.organization,
+            role: newAccount2.role,
+            updated_at: (/* @__PURE__ */ new Date()).toISOString()
+          });
+        } catch {
+        }
         auditLogs.unshift({
           id: "audit-" + Math.random().toString(36).substring(2, 9),
           timestamp: (/* @__PURE__ */ new Date()).toISOString(),
@@ -24895,9 +24945,16 @@ async function startServer() {
     console.log(`[API Sentinel] Protected routes: /api/protected/*`);
   });
 }
-startServer().catch((err) => {
-  console.error("Fatal error starting API Sentinel server:", err);
-  process.exit(1);
+if (process.env.VERCEL !== "1" && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  startServer().catch((err) => {
+    console.error("Fatal error starting API Sentinel server:", err);
+    process.exit(1);
+  });
+}
+var server_default = app;
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {
+  app
 });
 /*! Bundled license information:
 
