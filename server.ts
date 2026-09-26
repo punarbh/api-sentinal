@@ -72,6 +72,10 @@ app.use(
 
 // URL Normalization Middleware for serverless / Vercel API routing
 app.use((req, _res, next) => {
+  // Pass HTML document navigation requests directly to Vite / SPA static handler
+  if (req.method === 'GET' && req.headers.accept && req.headers.accept.includes('text/html')) {
+    return next();
+  }
   if (req.url && !req.url.startsWith('/api') && !req.url.startsWith('/ws') && !req.url.startsWith('/assets')) {
     if (
       req.url.startsWith('/auth') ||
